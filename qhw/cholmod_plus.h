@@ -1,4 +1,4 @@
-#include "cholmod.h"
+#include <suitesparse/cholmod.h>
 
 double my_cholmod_l_norm_dense //getEntryRef
 (

@@ -1,6 +1,4 @@
-
-#include "cholmod.h"
-// #include <Include/cholmod.h>
+#include <suitesparse/cholmod.h>
 
 // #include "cholmod_function.h"
 
@@ -21,7 +19,7 @@
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #define ABS(a)   (((a) >= (0)) ? (a) : -(a))
 
-#include "cholmod_function.h"
+#include <suitesparse/cholmod_function.h>
 
 
 int initLHS(cholmod_sparse* A, cholmod_common* cm); 

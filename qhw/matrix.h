@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cholmod_l.h"
+#include <suitesparse/cholmod.h>
 #include <string>
 
 cholmod_common* Begin();

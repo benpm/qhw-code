@@ -30,5 +30,4 @@ if(USE_CUDA)
 
 endif(USE_CUDA)
 
-# The executable code is here
 add_subdirectory(qhw)
