@@ -556,13 +556,7 @@ void s_pdapdt_lmul(const Eigen::VectorXd& at, const Dense& g_au, Eigen::VectorXd
 #endif
 
 void s_pdapdt_lmul(const arma::vec& at, const Dense& g_au, arma::vec& g_at, const Dense& FA, const int dim, const Para para) {
-#if 0
-	Dense dense_g_at = Dense::Zeros(g_au.nrow(), 1);
-	s_pdapdt_lmul(at.colptr(0), g_au, (double*)dense_g_at.dense_data->x, FA, dim); // g_at.memptr() or colptr(0) is not writable.  
-	g_at = dense_array_to_arma_vec(dense_g_at); 
-#else
 	s_pdapdt_lmul(at.colptr(0), g_au, g_at.colptr(0), FA, dim, para);
-#endif
 }
 
 void symmetric_tensor_assemble_indices(int*& I, int*& J, int f, int dim) {

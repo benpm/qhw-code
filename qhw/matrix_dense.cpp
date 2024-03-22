@@ -61,6 +61,7 @@ Dense& Dense::operator = (const Dense& dense) {
 	cm = cm_default();
 	*cm = *dense.cm;
 	dense_data = cholmod_l_copy_dense(dense.dense_data, cm);
+    return *this;
 }
 
 double& Dense::operator()(int row, int col) const{
@@ -376,7 +377,7 @@ void times_core(const Dense& A, const Dense& B, Dense& R) {
             {
                 for (int j = 0; j < R.ncol(); j++)
                 {
-#if 0
+#if DO_NOT_USE_MKL
                     for (int i = 0; i < R.nrow(); i++)
                     {
                     
@@ -393,7 +394,7 @@ void times_core(const Dense& A, const Dense& B, Dense& R) {
             {
                 for (int j = 0; j < R.ncol(); j++)
                 {
-#if 0
+#if DO_NOT_USE_MKL
                     for (int i = 0; i < R.nrow(); i++)
                     {
                     
@@ -964,6 +965,7 @@ DenseInt::DenseInt(const DenseInt& dense) {// copy constructor
 
 DenseInt& DenseInt::operator = (const DenseInt& t) { // assignment operator
     assign_denseint(t, *this);
+    return *this;
 }
 
 int& DenseInt::operator()(int row, int col) const {

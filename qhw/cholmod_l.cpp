@@ -369,8 +369,8 @@ int linSolve_ori(cholmod_sparse* A, cholmod_dense* B, cholmod_dense* XXX, cholmo
 
             Bset = cholmod_l_allocate_sparse (n, 1, 1, FALSE, TRUE, 0,
                 CHOLMOD_PATTERN, cm) ;
-            Bsetp = (long int *) Bset->p ;
-            Bseti = (long int *) Bset->i ;
+            Bsetp = (SuiteSparse_long *) Bset->p ;
+            Bseti = (SuiteSparse_long *) Bset->i ;
             Bsetp [0] = 0 ;     /* nnz(B) is 1 (it can be anything) */
             Bsetp [1] = 1 ;
             resid [3] = 0 ;
@@ -419,12 +419,12 @@ int linSolve_ori(cholmod_sparse* A, cholmod_dense* B, cholmod_dense* XXX, cholmo
                 t = MAX (t, 0) / NTRIALS ;
 
                 /* check the solution and log the time */
-                Xsetp = (long int *) Xset->p ;
-                Xseti = (long int *) Xset->i ;
+                Xsetp = (SuiteSparse_long *) Xset->p ;
+                Xseti = (SuiteSparse_long *) Xset->i ;
                 xlen = Xsetp [1] ;
                 X1x = (double *) X->x ;
                 X2x = (double *) X2->x ;
-                Lnz = (long int *) L->nz ;
+                Lnz = (SuiteSparse_long *) L->nz ;
 
                 if (xtype == CHOLMOD_REAL)
                 {
@@ -898,6 +898,8 @@ int symbolic_factorize(cholmod_sparse* A, cholmod_factor*& L, cholmod_common* cm
 
     L = cholmod_l_analyze_p(A, Perm, NULL, 0, cm);
     cholmod_l_free(n, sizeof(Long), Perm, cm);
+	return 0;
+
 }
 
 int numerical_factorize(cholmod_sparse* A, cholmod_factor* L, cholmod_common* cm)
@@ -915,6 +917,7 @@ int numerical_factorize(cholmod_sparse* A, cholmod_factor* L, cholmod_common* cm
         mexWarnMsgTxt("Matrix is close to singular or badly scaled.");
         mexPrintf("         Results may be inaccurate. RCOND = %g.\n", rcond);
     }
+	return 0;
 
 }
 
@@ -959,6 +962,8 @@ int solveLLT(cholmod_factor* L, cholmod_dense* B, cholmod_dense* XXX, cholmod_co
 	X = cholmod_l_solve(CHOLMOD_A, L, B, cm);
 	cholmod_l_copy_dense2(X, XXX, cm);
 #endif
+	return 0;
+
 }
 
 int linSolve(cholmod_sparse* A, cholmod_dense* B, cholmod_dense* XXX, cholmod_common* cm)
@@ -973,6 +978,8 @@ int linSolve(cholmod_sparse* A, cholmod_dense* B, cholmod_dense* XXX, cholmod_co
 
 	// cholmod_l_finish(cm);
 	// cholmod_l_print_common(" ", cm);
+	return 0;
+
 }
 
 // This is the one works by modifying the MATLAB wrapper. 
@@ -1195,5 +1202,6 @@ int linSolve2(cholmod_sparse* A, cholmod_dense* B, cholmod_dense* XXX, cholmod_c
     cholmod_l_free_factor(&L, cm);
     // cholmod_l_finish(cm);
     // cholmod_l_print_common(" ", cm);
+	return 0;
 
 }

@@ -3,8 +3,6 @@
 #endif
 // do this before include Eigen.
 
-#include "optim.hpp"
-
 #include "alap.h"
 #include "matrix.h" // ""
 
@@ -24,6 +22,8 @@
 
 #include "helper.h"
 #include "mesh.h"
+
+#include <ensmallen.hpp>
 
 static void show_usage()
 {
@@ -165,6 +165,272 @@ Dense dFW2dW_m(const Dense& D, const Dense& W)
     return arma_mat_to_dense_array(FD);
 }
 
+/* class DiffMesh
+{
+
+public:
+    int f, dim, mcdim;
+    DenseInt known, unknown;
+    Dense V, FA, BC;
+    Sparse Gx, Gy, Gz;
+    Sparse Gxk, Gxu, Gyk, Gyu;
+    Sparse Gzk, Gzu; // for 3D
+    int nk, nu; 
+    Sparse L; // Note L is not p.d., just p.s.d.
+    Sparse Mass, invMass, GxkT, GxuT, GykT, GyuT, GzkT, GzuT, A;
+
+    DiffMesh(Dense V, Dense BC, Dense mass_vertex, DenseInt F, DenseInt known) :
+        V(V), BC(BC), F(F), known(known)
+    {
+        f = F.nrow();
+        dim = F.ncol() - 1;
+        
+        complementary_list(known, V.nrow(), unknown);
+
+        FA = (dim == 3) ? volume(V, F) : area(V, F);
+
+        sparse_grads(V, F,
+            known,
+            Gx, Gy, Gz,
+            Gxk, Gxu, Gyk, Gyu,
+            Gzk, Gzu);
+
+        Mass = Sparse::Diag(mass_vertex);
+        invMass = Sparse::Diag(Dense::div(1.0, mass_vertex));
+
+        GxkT = Gxk.transposed();
+        GxuT = Gxu.transposed();
+        GykT = Gyk.transposed();
+        GyuT = Gyu.transposed();
+        if (dim == 3) {
+            GzkT = Gzk.transposed();
+            GzuT = Gzu.transposed();
+        }
+        
+        Sparse GxuT_A00 = GxuT;
+        Sparse GxuT_A01 = GxuT;
+
+        Sparse GyuT_A01 = GyuT;
+        Sparse GyuT_A11 = GyuT;
+
+        // Used for 3D only: 
+        Sparse GxuT_A02 = GxuT;
+        Sparse GzuT_A02 = GzuT;
+        Sparse GyuT_A12 = GyuT;
+        Sparse GzuT_A12 = GzuT;
+        Sparse GzuT_A22 = GzuT;
+
+        Sparse Mf = Sparse::Diag(FA);
+
+        Dense Zf = Dense::Zeros(f, 1);
+
+        Dense RFA = Dense::concatenate(FA,
+            Dense::concatenate(Zf, FA));
+
+        int stype = 1; // symmetric and use triu
+        Sparse A = GxuT_A00.mul(Gxu, stype)
+            + GyuT_A01.mul(Gxu, stype)
+            + GxuT_A01.mul(Gyu, stype)
+            + GyuT_A11.mul(Gyu, stype);
+        if (dim == 3) {
+            A = A
+                + GzuT_A22.mul(Gzu, stype)
+                + GxuT_A02.mul(Gzu, stype)
+                + GzuT_A02.mul(Gxu, stype)
+                + GyuT_A12.mul(Gzu, stype)
+                + GzuT_A12.mul(Gyu, stype);
+        }
+
+        L = (Mf * Gx).transposed().mul(Gx, stype) + (Mf * Gy).transposed().mul(Gy, stype);
+        if (dim == 3) {
+            L = L + (Mf * Gz).transposed().mul(Gz, stype);
+        }
+
+        int* I;
+        int* J;
+        symmetric_tensor_assemble_indices(I, J, f, dim);
+
+        // Setup the objective function:
+        Sparse Q; 
+        stype = 1; // 1: symmetric and use triu
+        (L * invMass).mul(L, Q, stype);
+        // So Q is a symmetric matrix such that 
+        // Q==L*M^-1*L. 
+
+        Sparse diagm = Sparse::Diag(
+            Dense::concatenate(FA, dim==2? FA : Dense::concatenate(FA, FA))
+        );
+
+        Sparse Quu, Quk;
+        Sparse Qku, Qkk;
+
+        Sparse Lua = (GxuT * Mf * Gx + GyuT * Mf * Gy);
+        Sparse Lka = (GxkT * Mf * Gx + GykT * Mf * Gy);
+        if (dim == 3) {
+            Lua = Lua + GzuT * Mf * Gz;
+            Lka = Lka + GzkT * Mf * Gz;
+        }
+        Sparse Lau = Lua.transposed();
+        Sparse Lak = Lka.transposed();
+        (Lua* invMass).mul(Lau, Quu, 0);
+        (Lka* invMass).mul(Lak, Qkk, 0);
+        (Lua* invMass).mul(Lak, Quk, 0);
+
+        Qku = Quk.transposed();
+
+        Sparse SA = GxuT * Mf * Gxk + GyuT * Mf * Gyk;
+        if (dim == 3)
+            SA = SA + GzuT * Mf * Gzk;
+        Dense B = (SA * BC) * (-1);
+
+        Dense X(B.nrow(), B.ncol());
+        Dense Y = A.mul(X);
+
+        A.symbolic_factor();
+        A.numerical_factor();
+
+        Dense W_u;
+        Dense GW;
+        Dense Res_u;
+        Dense BR;
+        Dense PS;
+
+        Dense st0 = Dense::Ones(f, 1);
+        // Dense st0 = FA;
+
+        Dense at0 = Dense::concatenate(st0,
+            Dense::concatenate(st0 * 1e-6, st0));
+        if (dim == 3) {
+            at0 = Dense::concatenate(at0,
+                Dense::concatenate(Dense::concatenate(st0,st0) * 1e-6, st0));
+        }
+
+        Dense au = at0;
+
+        Sparse diagAU = diagm;
+
+        Dense W(L.nrow(), BC.ncol());
+        W.slice_assign_value(known, BC, 0); // W(known, :) = BC;
+
+        Dense FW(L.nrow(), BC.ncol());
+        FW.slice_assign_value(known, BC, 0);
+
+        Dense FW_u, FW_k;
+
+        Dense gau = Dense::Zeros(f * mcdim, 1);
+        Dense gau_j = Dense::Zeros(f * mcdim, 1);
+        
+        std::function<Dense(const Dense&)> W2F_pn = [&](const Dense& W)
+        {
+            return W2F_n(W2F_m(W));
+            //return W2F_n(W);
+        };
+
+        std::function<Dense(const Dense&, const Dense&)> dFW2dW_pn = [&](const Dense& D, const Dense& W)
+        {
+            return dFW2dW_n(dFW2dW_m(D, W), W2F_m(W));
+            //return dFW2dW_n(D, W);
+        };
+        std::function<Dense(const Dense&)> W2F;
+        std::function<Dense(const Dense&, const Dense&)> dFW2dW;
+        W2F = [&](const Dense& W)
+        {
+            return W;
+        };
+        dFW2dW = [&](const Dense& D, const Dense& W)
+        {
+            return D;
+        };
+        Grad grad = compute_grads_pre(V, F);
+    }
+
+    // OPTIONAL: this may be implemented in addition to---or instead
+    // of---Evaluate() and Gradient().  If this is the only function implemented,
+    // implementations of Evaluate() and Gradient() will be automatically
+    // generated using template metaprogramming.  Often, implementing
+    // EvaluateWithGradient() can result in more efficient optimizations.
+    //
+    // Given parameters x and a matrix g, return the value of f(x) and store
+    // f'(x) in the provided matrix g.  g should have the same size (rows,
+    // columns) as x.
+    double EvaluateWithGradient(const arma::mat& at, arma::mat& gat)
+    {
+        s_at2au(at, au, FA, dim, para); 
+
+        Sparse A2 = Sparse::assemble_lap(GxuT, GyuT, GzuT, au, dim);
+        Sparse::assign_value_same_pattern(A2, A);
+        Sparse B = Sparse::assemble_lap_off_diag(GxuT, GyuT, GzuT, GxkT, GykT, GzkT, au, dim) * (BC * (-1));
+        configure_solve(A.cm);
+        A.numerical_factor();
+        W_u = A.solve_with_factor(B); // W_u = A\B; but more efficiently.
+        // project the weights to the probability simplex. 
+        FW_u = W2F(W_u);
+        FW_k = BC;
+
+        W.slice_assign_value(unknown, W_u, 0); // W(unknown, :) = W_u;
+                
+        compute_grads(V, F, grad, W, GW);
+
+        Res_u = (Quu.mul(FW_u) + Quk.mul(FW_k))* 2.0;
+
+        Dense dW = dFW2dW(Res_u, W_u); // since dFW2dW is a row-wise operation
+
+
+        BR = A.solve_with_factor(dW);
+
+
+        PS = Dense::concatenate(Gxu.mul(BR), Gyu.mul(BR));
+        if (dim == 3)
+            PS = Dense::concatenate(PS, Gzu.mul(BR));
+
+        if (TIMING) 
+        {
+            printf("Check point 9: %f. \t Mat Multiplication 2.\n", GetTime() - t); t = GetTime();
+        }
+
+        gau = Dense::Zeros(f * mcdim, 1);
+
+        for (int j = 0; j < W.ncol(); j++) 
+        {
+            symmetric_tensor_span_dot(&GW(0, j), &PS(0, j), gau_j.head(), f, dim);
+            // gau = gau - gau_j;
+            Dense::saxy(gau_j, gau, -1.0);
+        }
+
+        if (TIMING) 
+        {
+            printf("Check point 10: %f.\n", GetTime() - t); t = GetTime();
+        }
+
+        //gat <- gau: back-prop grad
+
+        // s_pdapdt_lmul_fast(at_tmp, gau, gat, FA, dim, para);
+        s_pdapdt_lmul(at, gau, gat, FA, dim, para); 
+
+        if (TIMING) 
+        {
+            printf("Check point 11: %f.\n", GetTime() - t); t = GetTime();
+        }
+
+        i++;
+        return e;
+        // e may not be the function value, depends on parameters. 
+    }
+};
+*/
+
+class DiffFun
+{
+private:
+    std::function<double(const arma::mat&, arma::mat&)> fun;
+
+public:
+    DiffFun(std::function<double(const arma::mat&, arma::mat&)> fun) : fun(fun) { }
+
+    double EvaluateWithGradient(const arma::mat& x, arma::mat& g) {
+        return fun(x, g);
+    }
+};
 
 int main(int argc, char** argv)
 {
@@ -172,7 +438,7 @@ int main(int argc, char** argv)
     const std::string SNAPSHOT_NONE = std::string("none");
 
     std::vector <std::string> sources;
-    std::string EXAMPLE = std::string("/qhw/qhw/data/tibiman-H");
+    std::string EXAMPLE = std::string("./data/tibiman-H");
     std::string SOLVER = std::string("adamd");
     std::string SNAPSHOT = SNAPSHOT_NONE;
     std::string OUTPUT = std::string("");
@@ -314,7 +580,7 @@ int main(int argc, char** argv)
     std::string folder;
     int dim = 2;
 
-    folder = EXAMPLE + std::string("/");
+    folder = sources.front();
 
     printf("Loading files from %s.\n", folder.c_str());
 
@@ -604,9 +870,6 @@ int main(int argc, char** argv)
 
     Grad grad = compute_grads_pre(V, F);
 
-    // GRADtf64 grad_tf = GRADtf64(V, F, W.ncol());
-    GRADtf grad_tf = GRADtf(V, F, W.ncol());
-
     int i = 0;
     double start_time = GetTime();
     // Dense gat = Dense::Zeros(mcdim * f, 1);
@@ -615,7 +878,7 @@ int main(int argc, char** argv)
 
     const Para para; 
 
-    auto fun = [&](const arma::vec& at, arma::vec& gat)
+    auto fun = [&](const arma::mat& at, arma::mat& gat)
     {
 
         t = GetTime();
@@ -629,7 +892,7 @@ int main(int argc, char** argv)
 
         // arma::vec at_tmp = at;
         // s_at2au_fast(at_tmp, au, FA, dim, para);
-        s_at2au(at, au, FA, dim, para); 
+        s_at2au(at.colptr(0), au, FA, dim, para); 
 
         if (TIMING) 
         {
@@ -675,7 +938,7 @@ int main(int argc, char** argv)
         // many optimizers do not rely on the energy value e, only its gradient. 
         // in this case e can be an arbitary value to save time.
 
-        bool last_iter = i == (NUM_ITER * (REPEAT + 1)); // it's not (i+1) here. 
+        bool last_iter = i == NUM_ITER-2; // it's not (i+1) here. 
 
         if (verbose > 2 || last_iter) 
         {
@@ -728,7 +991,7 @@ int main(int argc, char** argv)
 
         // Calculate gradients. 
 
-        switch (4) { // 4 is fastest
+        switch (2) { // 4 is fastest
 
         case 0:
 
@@ -754,15 +1017,13 @@ int main(int argc, char** argv)
             break;
 
         case 3:
-
-            tf_compute_grads(V, F, W, GW);
-
+            ///NOTE: removed to get rid of tensorflow dependency
+            // tf_compute_grads(V, F, W, GW);
             break;
 
         case 4:
-
-            grad_tf.run(W, GW);
-
+            ///NOTE: removed to get rid of tensorflow dependency
+            // grad_tf.run(W, GW);
             break;
         default:
             ;
@@ -791,7 +1052,7 @@ int main(int argc, char** argv)
 
         // Calculate gradients for the second time
 
-        switch (2) { // 2 is fastest
+        switch (1) { // 2 is fastest
 
         case 0:
 
@@ -809,13 +1070,14 @@ int main(int argc, char** argv)
 
         case 2:
 
-            static Dense BRa;
-            if (i==0)
-                BRa = Dense::Zeros(V.nrow(), BR.ncol());
+            ///NOTE: removed to get rid of tensorflow dependency
+            // static Dense BRa;
+            // if (i==0)
+            //     BRa = Dense::Zeros(V.nrow(), BR.ncol());
 
-            BRa.slice_assign_value(unknown, BR, 0);
+            // BRa.slice_assign_value(unknown, BR, 0);
 
-            grad_tf.run(BRa, PS);
+            // grad_tf.run(BRa, PS);
 
             break;
 
@@ -845,7 +1107,7 @@ int main(int argc, char** argv)
         /* gat <- gau: back-prop grad */
         
         // s_pdapdt_lmul_fast(at_tmp, gau, gat, FA, dim, para);
-        s_pdapdt_lmul(at, gau, gat, FA, dim, para); 
+        s_pdapdt_lmul(at.colptr(0), gau, gat.colptr(0), FA, dim, para); 
         
         if (TIMING) 
         {
@@ -859,76 +1121,11 @@ int main(int argc, char** argv)
 
     Dense at_out;
     {
-        using arma::vec;
-        using arma::mat;
-        vec at = dense_array_to_arma_vec(at0);
+        arma::vec at = dense_array_to_arma_vec(at0);
 
-        printf("Solver: %s\n", SOLVER.c_str());
-
-        if (SOLVER==std::string("adamd")) 
-        {
-            /* Adam - based optim */
-
-            optim::algo_settings_t settings;
-            settings.gd_method = 6;
-            settings.gd_settings.step_size = STEP_SIZE;
-            settings.iter_max = NUM_ITER;
-
-            std::function<double(const arma::vec&, arma::vec*, void*)> fn 
-                = [&](const arma::vec& at, arma::vec* pgat, void* opt_data) {
-                double v = fun(at, *pgat);
-                return v;
-            };
-
-            for (int j = 0; j < REPEAT; j++)
-            {
-                optim::gd2(at, fn, NULL, settings); // gd2 gets rid of an extra call of fn at the end. 
-
-                settings.gd_settings.step_size /= 2.0;
-                printf("\nlr=%g \n", settings.gd_settings.step_size);
-            }
-
-            optim::gd(at, fn, NULL, settings);
-            // NUM_ITER * REPEAT + NUM_ITER: in total
-
-        } 
-        else if (SOLVER == std::string("adam")) 
-        {
-
-            optim::algo_settings_t settings;
-            settings.gd_method = 6;
-            settings.gd_settings.step_size = STEP_SIZE;
-            settings.iter_max = NUM_ITER * (REPEAT+1);
-
-            std::function<double(const arma::vec&, arma::vec*, void*)> fn
-                = [&](const arma::vec& at, arma::vec* pgat, void* opt_data) {
-                double v = fun(at, *pgat);
-                return v;
-            };
-
-            optim::gd(at, fn, NULL, settings);
-
-        } 
-        else if (SOLVER == std::string("lbfgs")) 
-        {
-
-            optim::algo_settings_t settings;
-            settings.iter_max = NUM_ITER * (REPEAT + 1);
-            settings.lbfgs_par_M = LBFGS_M;
-
-            std::function<double(const arma::vec&, arma::vec*, void*)> fn
-                = [&](const arma::vec& at, arma::vec* pgat, void* opt_data) {
-                double v = fun(at, *pgat);
-                return v;
-            };
-
-            optim::lbfgs(at, fn, NULL, settings);
-
-        }
-        else 
-        {
-            std::cerr << "--solver not supported." << std::endl;
-        }
+        ens::GradientDescent optimizer(STEP_SIZE, NUM_ITER, 0.0);
+        DiffFun fn(fun);
+        optimizer.Optimize(fn, at);
 
         at_out = arma_vec_to_dense_array(at);
     }

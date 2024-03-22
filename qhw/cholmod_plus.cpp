@@ -4289,6 +4289,7 @@ int matvec(int M, int N, int NNZ, double* csrVal, MKL_INT* csrColInd, MKL_INT* c
 	}
 	// Release matrix handle and deallocate matrix
 	mkl_sparse_destroy(csrA);
+	return 0;
 }
 
 int spmat_csc(int M, int N, int NNZ, double* cscVal, MKL_INT* cscRowInd, MKL_INT* cscColPtr, double* x, double* y, int nColDense, bool transpose) {
@@ -4363,6 +4364,8 @@ int spmat_csc(int M, int N, int NNZ, double* cscVal, MKL_INT* cscRowInd, MKL_INT
 
 	// Release matrix handle and deallocate matrix
 	mkl_sparse_destroy(cscA);
+	return 0;
+
 }
 
 int matvec_csc(int M, int N, int NNZ, double* cscVal, MKL_INT* cscRowInd, MKL_INT* cscColPtr, double* x, double* y, bool transpose) {
@@ -4433,172 +4436,7 @@ int matvec_csc(int M, int N, int NNZ, double* cscVal, MKL_INT* cscRowInd, MKL_IN
 
 	// Release matrix handle and deallocate matrix
 	mkl_sparse_destroy(cscA);
+	return 0;
+
 }
 
-
-static void r_cholmod_sdmult_mkl
-(
-	/* ---- input ---- */
-	cholmod_sparse* A,	/* sparse matrix to multiply */
-	int transpose,	/* use A if 0, or A' otherwise */
-	double alpha[2],   /* scale factor for A */
-	double beta[2],    /* scale factor for Y */
-	cholmod_dense* X,	/* dense matrix to multiply */
-	/* ---- in/out --- */
-	cholmod_dense* Y,	/* resulting dense matrix */
-	/* -- workspace -- */
-	double* W		/* size 4*nx if needed, twice that for c/zomplex case */
-)
-{
-
-	double yx[8], xx[8], ax[2];
-
-	double* Ax, * Az, * Xx, * Xz, * Yx, * Yz, * w, * Wz;
-	Int* Ap, * Ai, * Anz;
-	size_t nx, ny, dx, dy;
-	Int packed, nrow, ncol, j, k, p, pend, kcol, i;
-
-
-	/* ---------------------------------------------------------------------- */
-	/* get inputs */
-	/* ---------------------------------------------------------------------- */
-
-	ny = transpose ? A->ncol : A->nrow;	/* required length of Y */
-	nx = transpose ? A->nrow : A->ncol;	/* required length of X */
-
-	nrow = A->nrow;
-	ncol = A->ncol;
-
-	Ap = (Int*)A->p;
-	Anz = (Int*)A->nz;
-	Ai = (Int*)A->i;
-	Ax = (double*)A->x;
-	Az = (double*)A->z;
-	packed = A->packed;
-	Xx = (double*)X->x;
-	Xz = (double*)X->z;
-	Yx = (double*)Y->x;
-	Yz = (double*)Y->z;
-	kcol = X->ncol;
-	dy = Y->d;
-	dx = X->d;
-	w = W;
-	Wz = W + 4 * nx;
-
-
-	Int nrow_x = X->nrow;
-	Int nrow_y = Y->nrow;
-	// Int kcol = X->ncol; // already have.
-
-	/* ---------------------------------------------------------------------- */
-	/* Y = beta * Y  wangyu removed this part for nonzero beta*/
-	/* ---------------------------------------------------------------------- */
-
-	/* ---------------------------------------------------------------------- */
-	/* Y += alpha * op(A) * X, where op(A)=A or A' */
-	/* ---------------------------------------------------------------------- */
-
-	Yx = (double*)Y->x;
-	Yz = (double*)Y->z;
-
-	k = 0;
-
-	ASSERT(A->stype == 0);
-	ASSERT(packed);
-
-	const int M = A->nrow;
-	const int N = A->ncol;
-	const int NNZ = A->nzmax;
-
-	double* x;
-	double* y;
-
-	// ASSERT(sizeof(INT) == sizeof(MKL_INT));
-
-	// Do not have to clear what is in y since a beta=0 will be used in the methods. 
-
-	if (true) {
-
-		double* cscVal = Ax;
-		MKL_INT* cscRowInd = Ai;
-		MKL_INT* cscColPtr = Ap;
-
-		x = Xx;
-		y = Yx;
-
-		if (true) {
-			ASSERT(false);
-			for (j = 0; j < kcol; j++)
-			{
-				x = &(Xx[j * nrow_x]);
-				y = &(Yx[j * nrow_y]);
-				matvec_csc(M, N, NNZ, cscVal, cscRowInd, cscColPtr, x, y, transpose);
-			}
-		} 
-		else {
-			spmat_csc(M, N, NNZ, cscVal, cscRowInd, cscColPtr, x, y, kcol, transpose); // matmat();
-			// use kcol instead of nCol since A could be transposed. 
-		}
-	}
-	else {
-
-		ASSERT(false); // TODO
-
-		double* csrVal = Ax;
-		MKL_INT* csrColInd = Ai;
-		MKL_INT* csrRowPtr = Ap;
-
-	}
-
-#if 0
-	{
-		for (j = 0; j < ncol; j++)
-		{
-			p = Ap[j];
-			pend = (packed) ? (Ap[j + 1]) : (p + Anz[j]);
-			if (xtype == CHOLMOD_PATTERN)
-			{
-				s = pend - p;
-			}
-			else
-			{
-				s = 0;
-				for (; p < pend; p++)
-				{
-					s += abs_value(xtype, Ax, Az, p, Common); // i.e.  Ax[p] for real
-				}
-			}
-			sum += s;
-		}
-	}
-
-	{
-		/* xj0 = alpha [0] * x [j     ] ; */
-		/* xj1 = alpha [0] * x [j+  dx] ; */
-		/* xj2 = alpha [0] * x [j+2*dx] ; */
-		/* xj3 = alpha [0] * x [j+3*dx] ; */
-		MULT(xx, xz, 0, alpha, alphaz, 0, Xx, Xz, j);
-		MULT(xx, xz, 1, alpha, alphaz, 0, Xx, Xz, j + dx);
-		MULT(xx, xz, 2, alpha, alphaz, 0, Xx, Xz, j + 2 * dx);
-		MULT(xx, xz, 3, alpha, alphaz, 0, Xx, Xz, j + 3 * dx);
-
-		p = Ap[j];
-		pend = (packed) ? (Ap[j + 1]) : (p + Anz[j]);
-		for (; p < pend; p++)
-		{
-			i = Ai[p];
-			/* aij = Ax [p] ; */
-			ASSIGN(ax, az, 0, Ax, Az, p);
-
-			/* y [i     ] += aij * xj0 ; */
-			/* y [i+  dy] += aij * xj1 ; */
-			/* y [i+2*dy] += aij * xj2 ; */
-			/* y [i+3*dy] += aij * xj3 ; */
-			MULTADD(Yx, Yz, i, ax, az, 0, xx, xz, 0);
-			MULTADD(Yx, Yz, i + dy, ax, az, 0, xx, xz, 1);
-			MULTADD(Yx, Yz, i + 2 * dy, ax, az, 0, xx, xz, 2);
-			MULTADD(Yx, Yz, i + 3 * dy, ax, az, 0, xx, xz, 3);
-		}
-	}
-#endif
-}

@@ -1,3 +1,6 @@
 [submodule "optim"]
 	path = optim
 	url = https://github.com/wangyu9/optim.git
+[submodule "external/ensmallen"]
+	path = external/ensmallen
+	url = https://github.com/mlpack/ensmallen.git

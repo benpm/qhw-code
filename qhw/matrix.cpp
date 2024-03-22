@@ -530,11 +530,6 @@ void Sparse::init_ori(const std::string filename, const int prefer_zomplex) {
     /* read in a matrix */
     /* ---------------------------------------------------------------------- */
 
-    printf("\n---------------------------------- cholmod_l_demo:\n");
-    cholmod_l_version(ver);
-    printf("cholmod version %d.%d.%d\n", ver[0], ver[1], ver[2]);
-    SuiteSparse_version(ver);
-    printf("SuiteSparse version %d.%d.%d\n", ver[0], ver[1], ver[2]);
     sparse_data = cholmod_l_read_sparse(f, cm);
     if (ff != NULL)
     {
